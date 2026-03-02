@@ -1,0 +1,13 @@
+pandas
+pyJWT
+chromadb
+fastapi
+uvicorn
+python-dotenv
+requests
+groq
+openai
+sentence-transformers
+supabase
+bcrypt
+pydantic[email]

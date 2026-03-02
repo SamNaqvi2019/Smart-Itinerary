@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native build folders
+/ios
+/android
+.kotlin/
+
+# Metro
+.metro-health-check*
+
+# Debug logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+
+# Environment files
+.env
+.env.*
+.env*.local
+
+# Keys and certificates
+*.pem
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# TypeScript
+*.tsbuildinfo
+
+# Expo example
+app-example
+
+# Editor
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+sentence_env/
+
+# Backend data (large files)
+backend/vector_db/
+backend/data/spots_with_embeddings.json
+backend/data/hotels_with_embeddings.json
+backend/data/users.db
+backend/backend.log
+
+# ngrok
+*.ngrok*

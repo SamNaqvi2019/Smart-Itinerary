@@ -1,0 +1,147 @@
+/**
+ * Mapping of Pakistani cities to their regions/provinces
+ */
+export const CITY_TO_REGION: Record<string, string> = {
+  // KPK (Khyber Pakhtunkhwa)
+  'Peshawar': 'KPK',
+  'Mardan': 'KPK',
+  'Mingora (Swat)': 'KPK',
+  'Swat': 'KPK',
+  'Naran': 'KPK',
+  'Kaghan': 'KPK',
+  'Abbottabad': 'KPK',
+  'Mansehra': 'KPK',
+  'Chitral': 'KPK',
+  'Dir': 'KPK',
+  'Kohat': 'KPK',
+  'Swabi': 'KPK',
+  'Charsadda': 'KPK',
+  'Nowshera': 'KPK',
+  'Buner': 'KPK',
+  'Malakand': 'KPK',
+  'Upper Dir': 'KPK',
+  'Lower Dir': 'KPK',
+  'Battagram': 'KPK',
+  'Kohistan': 'KPK',
+  'Shangla': 'KPK',
+  'Torghar': 'KPK',
+  'Hangu': 'KPK',
+  'Karak': 'KPK',
+  'Lakki Marwat': 'KPK',
+  'Bannu': 'KPK',
+  'Tank': 'KPK',
+  'Dera Ismail Khan': 'KPK',
+  'Haripur': 'KPK',
+
+  // Gilgit-Baltistan
+  'Hunza': 'Gilgit-Baltistan',
+  'Skardu': 'Gilgit-Baltistan',
+  'Gilgit': 'Gilgit-Baltistan',
+
+  // Punjab
+  'Lahore': 'Punjab',
+  'Rawalpindi': 'Punjab',
+  'Multan': 'Punjab',
+  'Faisalabad': 'Punjab',
+  'Sialkot': 'Punjab',
+  'Gujranwala': 'Punjab',
+  'Bahawalpur': 'Punjab',
+  'Sargodha': 'Punjab',
+  'Sahiwal': 'Punjab',
+  'Okara': 'Punjab',
+  'Kasur': 'Punjab',
+  'Jhelum': 'Punjab',
+  'Gujrat': 'Punjab',
+  'Sheikhupura': 'Punjab',
+  'Attock': 'Punjab',
+  'Chiniot': 'Punjab',
+  'Jhang': 'Punjab',
+  'Khanewal': 'Punjab',
+  'Layyah': 'Punjab',
+  'Mianwali': 'Punjab',
+  'Vehari': 'Punjab',
+  'Burewala': 'Punjab',
+
+  // Sindh
+  'Karachi': 'Sindh',
+  'Hyderabad': 'Sindh',
+  'Sukkur': 'Sindh',
+  'Larkana': 'Sindh',
+  'Nawabshah': 'Sindh',
+  'Thatta': 'Sindh',
+  'Badin': 'Sindh',
+  'Dadu': 'Sindh',
+  'Khairpur': 'Sindh',
+  'Jamshoro': 'Sindh',
+  'Umerkot': 'Sindh',
+  'Tharparkar': 'Sindh',
+  'Kashmore': 'Sindh',
+  'Ghotki': 'Sindh',
+  'Naushahro Feroze': 'Sindh',
+  'Matiari': 'Sindh',
+  'Tando Allahyar': 'Sindh',
+  'Tando Muhammad Khan': 'Sindh',
+  'Sujawal': 'Sindh',
+  'Qambar Shahdadkot': 'Sindh',
+  'Jacobabad': 'Sindh',
+  'Shikarpur': 'Sindh',
+
+  // Balochistan
+  'Quetta': 'Balochistan',
+  'Gwadar': 'Balochistan',
+  'Turbat': 'Balochistan',
+  'Khuzdar': 'Balochistan',
+  'Dera Ghazi Khan': 'Balochistan',
+  'Killa Abdullah': 'Balochistan',
+  'Pishin': 'Balochistan',
+  'Ziarat': 'Balochistan',
+  'Loralai': 'Balochistan',
+  'Sibi': 'Balochistan',
+  'Kharan': 'Balochistan',
+  'Washuk': 'Balochistan',
+  'Panjgur': 'Balochistan',
+  'Kech': 'Balochistan',
+  'Awaran': 'Balochistan',
+  'Lasbela': 'Balochistan',
+  'Kalat': 'Balochistan',
+  'Mastung': 'Balochistan',
+  'Nushki': 'Balochistan',
+  'Chagai': 'Balochistan',
+  'Dera Bugti': 'Balochistan',
+  'Kohlu': 'Balochistan',
+  'Barkhan': 'Balochistan',
+  'Musakhel': 'Balochistan',
+  'Sherani': 'Balochistan',
+  'Zhob': 'Balochistan',
+  'Killa Saifullah': 'Balochistan',
+  'Harnai': 'Balochistan',
+  'Duki': 'Balochistan',
+  'Sohbatpur': 'Balochistan',
+  'Jaffarabad': 'Balochistan',
+  'Nasirabad': 'Balochistan',
+  'Jhal Magsi': 'Balochistan',
+  'Kachhi': 'Balochistan',
+  'Bolan': 'Balochistan',
+  'Lehri': 'Balochistan',
+  'Sui': 'Balochistan',
+  'Dera Murad Jamali': 'Balochistan',
+  'Gandakha': 'Balochistan',
+  'Usta Muhammad': 'Balochistan',
+
+  // Azad Jammu & Kashmir
+  'Muzaffarabad': 'AJK',
+  'Mirpur': 'AJK',
+
+  // Islamabad Capital Territory
+  'Islamabad': 'ICT',
+  'Murree': 'Punjab', // Murree is in Punjab but close to Islamabad
+};
+
+/**
+ * Get region/province for a given city
+ */
+export function getRegionForCity(city: string): string {
+  if (!city) return '';
+  return CITY_TO_REGION[city.trim()] || '';
+}
+
