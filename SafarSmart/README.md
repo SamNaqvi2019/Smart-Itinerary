@@ -127,12 +127,14 @@ python run_server.py
 # → Swagger docs at http://localhost:8000/docs
 ```
 
+ngrok http 8000
 ### 5. Start the Mobile App
 
 ```bash
 cd SafarSmart
 npm install
 npx expo start --tunnel
+
 # Scan QR code with Expo Go on your phone
 ```
 

@@ -10,7 +10,8 @@ import json
 import base64
 import random
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 import gradio as gr
 import requests
@@ -1279,9 +1280,7 @@ def call_itinerary_api(
     if region_clean and len(region_clean) > 100:
         region_clean = region_clean[:100]
     
-    travel_date_clean = travel_date.strip() if travel_date and travel_date.strip() else None
-    if travel_date_clean and len(travel_date_clean) > 50:
-        travel_date_clean = travel_date_clean[:50]
+    travel_date_clean = _normalize_date_input(travel_date)
     
     payload = {
         "destination_city": destination_city.strip()[:100],
@@ -1476,7 +1475,340 @@ def get_user_profile(token: str) -> str:
     except:
         return "Not logged in"
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PLAN YOUR TRIP — API helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+TRIP_OPTIONS_ENDPOINT = "/api/trip/options"
+TRIP_ITINERARY_ENDPOINT = "/api/trip/itinerary"
+
+WEATHER_CODE_LABELS = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Depositing rime fog",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    71: "Slight snow",
+    73: "Moderate snow",
+    75: "Heavy snow",
+    80: "Slight rain showers",
+    81: "Moderate rain showers",
+    82: "Violent rain showers",
+    95: "Thunderstorm",
+}
+
+
+def _normalize_date_input(value: Any) -> Optional[str]:
+    """Normalize date-like inputs to YYYY-MM-DD string."""
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if "T" in raw:
+            raw = raw.split("T", 1)[0]
+        return raw[:50]
+
+    return str(value)[:50]
+
+
+def build_transport_redirect_markdown(
+    mode: Optional[str],
+    origin: Optional[str],
+    destination: Optional[str],
+    travel_date: Optional[Any],
+) -> str:
+    """Build a transport provider redirect link based on selected mode."""
+    mode_clean = (mode or "").strip().lower()
+    date_value = _normalize_date_input(travel_date) or datetime.now().date().isoformat()
+    origin_value = (origin or "").strip() or "Lahore"
+    destination_value = (destination or "").strip() or "Multan"
+
+    if mode_clean == "bus":
+        bus_params = urlencode(
+            {"from": origin_value, "to": destination_value, "date": date_value}
+        )
+        url = f"https://bookkaru.com/bus/listing?{bus_params}"
+        return (
+            "### 🚌 Bus Booking Redirect\n\n"
+            f"[Open BookKaru Bus Listing]({url})\n\n"
+            f"`{url}`"
+        )
+    if mode_clean == "indrive":
+        url = "https://indrive.com/"
+        return f"### 🚕 InDrive Redirect\n\n[Open InDrive]({url})\n\n`{url}`"
+    if mode_clean == "train":
+        url = "https://www.pakrailways.gov.pk/train"
+        return f"### 🚂 Train Booking Redirect\n\n[Open Pakistan Railways]({url})\n\n`{url}`"
+
+    return "❌ Please choose a transport mode first (Bus, InDrive, or Train)."
+
+
+def build_daily_weather_markdown(
+    destination: Optional[str],
+    travel_date: Optional[Any],
+    num_days: int,
+) -> str:
+    """Fetch and format daily weather for selected travel days."""
+    destination_clean = (destination or "").strip()
+    if not destination_clean:
+        return "❌ Enter a destination city to load weather."
+
+    safe_days = max(1, min(int(num_days or 1), 14))
+    start_date_str = _normalize_date_input(travel_date) or datetime.now().date().isoformat()
+    try:
+        start_date = datetime.fromisoformat(start_date_str).date()
+    except ValueError:
+        start_date = datetime.now().date()
+
+    end_date = start_date + timedelta(days=safe_days - 1)
+
+    try:
+        geo_resp = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": destination_clean, "count": 1, "language": "en", "format": "json"},
+            timeout=15,
+        )
+        geo_resp.raise_for_status()
+        geo_data = geo_resp.json()
+        results = geo_data.get("results", [])
+        if not results:
+            return f"❌ Could not find location for `{destination_clean}`."
+
+        first = results[0]
+        lat = first.get("latitude")
+        lon = first.get("longitude")
+        resolved_name = first.get("name", destination_clean)
+        country = first.get("country", "")
+
+        weather_resp = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "daily": "weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "timezone": "auto",
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+            },
+            timeout=15,
+        )
+        weather_resp.raise_for_status()
+        weather_data = weather_resp.json().get("daily", {})
+    except requests.RequestException as exc:
+        return f"❌ Weather service request failed: {exc}"
+    except (ValueError, TypeError):
+        return "❌ Weather service returned an invalid response."
+
+    dates = weather_data.get("time", [])
+    t_max = weather_data.get("temperature_2m_max", [])
+    t_min = weather_data.get("temperature_2m_min", [])
+    weather_codes = weather_data.get("weathercode", [])
+    precip = weather_data.get("precipitation_probability_max", [])
+
+    if not dates:
+        return "❌ No weather data available for the selected dates."
+
+    location_label = f"{resolved_name}, {country}".strip(", ")
+    lines = [f"### 🌤️ Daily Weather Forecast ({location_label})", ""]
+    lines.append("| Date | Weather | Min / Max (°C) | Rain Chance |")
+    lines.append("|---|---|---|---|")
+
+    for i, day_str in enumerate(dates):
+        code = weather_codes[i] if i < len(weather_codes) else None
+        weather_text = WEATHER_CODE_LABELS.get(code, "Unknown")
+        min_c = t_min[i] if i < len(t_min) else "N/A"
+        max_c = t_max[i] if i < len(t_max) else "N/A"
+        rain = precip[i] if i < len(precip) else "N/A"
+        lines.append(f"| {day_str} | {weather_text} | {min_c} / {max_c} | {rain}% |")
+
+    return "\n".join(lines)
+
+
+def call_trip_options(
+    origin: str,
+    destination: str,
+    num_days: int,
+    num_travelers: int,
+) -> Tuple[str, List[str], List[str], Any]:
+    """
+    Calls POST /api/trip/options.
+    Returns: (status_msg, hotel_choices, transport_choices, raw_response)
+    hotel_choices / transport_choices are human-readable option strings for gr.Radio.
+    """
+    if not origin.strip():
+        return "❌ Origin city is required.", [], [], None
+    if not destination.strip():
+        return "❌ Destination city is required.", [], [], None
+    if num_days < 1 or num_days > 30:
+        return "❌ Number of days must be between 1 and 30.", [], [], None
+    if num_travelers < 1 or num_travelers > 20:
+        return "❌ Number of travelers must be between 1 and 20.", [], [], None
+
+    payload = {
+        "origin": origin.strip(),
+        "destination": destination.strip(),
+        "num_days": int(num_days),
+        "num_travelers": int(num_travelers),
+    }
+
+    try:
+        resp = requests.post(
+            f"{API_BASE}{TRIP_OPTIONS_ENDPOINT}", json=payload, timeout=60
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as exc:
+        return f"❌ Request failed: {exc}", [], [], None
+    except ValueError:
+        return "❌ Backend returned a non-JSON response.", [], [], None
+
+    hotels = data.get("hotel_options", [])
+    transports = data.get("transport_options", [])
+    dist = data.get("distance_km", 0)
+
+    hotel_choices = []
+    for i, h in enumerate(hotels):
+        stars = "⭐" * int(h.get("star_rating", 3))
+        name = h.get("name", f"Hotel {i+1}")
+        location = h.get("location", "")
+        ppn = h.get("price_per_night", 0)
+        total = h.get("total_price", ppn * num_days)
+        label = f"{stars} {name} — {location} | PKR {ppn:,.0f}/night (Total: PKR {total:,.0f})"
+        hotel_choices.append(label)
+
+    transport_choices = []
+    for i, t in enumerate(transports):
+        t_type = t.get("type", "").capitalize()
+        provider = t.get("provider", "")
+        duration = t.get("duration", "")
+        total = t.get("total_price", 0)
+        ppp = t.get("price_per_person", 0)
+        label = f"{_transport_emoji(t_type)} {provider} | PKR {ppp:,.0f}/person · Total PKR {total:,.0f} · ⏱ {duration}"
+        transport_choices.append(label)
+
+    status = f"✅ Options loaded! Route: {origin} → {destination} ({dist:.0f} km). Select a hotel and transport below."
+    return status, hotel_choices, transport_choices, data
+
+
+def _transport_emoji(t_type: str) -> str:
+    mapping = {"Flight": "✈️", "Bus": "🚌", "Train": "🚂", "Car": "🚗"}
+    for key, emoji in mapping.items():
+        if key.lower() in t_type.lower():
+            return emoji
+    return "🚐"
+
+
+def call_generate_trip_itinerary(
+    options_data: Any,
+    hotel_idx: int,
+    transport_idx: int,
+) -> str:
+    """
+    Calls POST /api/trip/itinerary with SelectionRequest.
+    Returns formatted markdown string.
+    """
+    if not options_data:
+        return "❌ Please fetch trip options first."
+    if hotel_idx < 0:
+        return "❌ Please select a hotel."
+    if transport_idx < 0:
+        return "❌ Please select a transport option."
+
+    trip_request = options_data.get("_trip_request", {})
+    hotel_options = options_data.get("hotel_options", [])
+    transport_options = options_data.get("transport_options", [])
+
+    if hotel_idx >= len(hotel_options):
+        return "❌ Hotel selection out of range. Please fetch options again."
+    if transport_idx >= len(transport_options):
+        return "❌ Transport selection out of range. Please fetch options again."
+
+    payload = {
+        "trip_request": trip_request,
+        "selected_hotel_index": hotel_idx,
+        "selected_transport_index": transport_idx,
+        "hotel_options": hotel_options,
+        "transport_options": transport_options,
+    }
+
+    try:
+        resp = requests.post(
+            f"{API_BASE}{TRIP_ITINERARY_ENDPOINT}", json=payload, timeout=90
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as exc:
+        return f"❌ Request failed: {exc}"
+    except ValueError:
+        return "❌ Backend returned a non-JSON response."
+
+    return _format_trip_itinerary(data)
+
+
+def _format_trip_itinerary(data: Dict[str, Any]) -> str:
+    """Format TripItineraryResponse into a clean markdown string."""
+    lines = []
+    cs = data.get("cost_summary", {})
+
+    hotel_name = cs.get("hotel_name", "Selected Hotel")
+    hotel_ppn = cs.get("hotel_price_per_night", 0)
+    hotel_total = cs.get("hotel_total", 0)
+    transport_name = cs.get("transport_name", "Selected Transport")
+    transport_total = cs.get("transport_total", 0)
+    grand_total = cs.get("total_estimated_cost", 0)
+    note = cs.get("note", "Activities and food are not included in this estimate")
+
+    lines.append("## 💰 Estimated Cost Summary")
+    lines.append("")
+    lines.append("| | |")
+    lines.append("|---|---|")
+    lines.append(f"| 🏨 **Hotel** | {hotel_name} |")
+    lines.append(f"| | PKR {hotel_ppn:,.0f}/night × nights = **PKR {hotel_total:,.0f}** |")
+    lines.append(f"| 🚌 **Transport** | {transport_name} |")
+    lines.append(f"| | Total: **PKR {transport_total:,.0f}** |")
+    lines.append(f"| 🧾 **TOTAL ESTIMATED COST** | **PKR {grand_total:,.0f}** |")
+    lines.append("")
+    lines.append(f"> ⚠️ {note}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 🗓️ Day-by-Day Itinerary")
+    lines.append("")
+
+    days = data.get("days", [])
+    for day in days:
+        day_num = day.get("day_number", "")
+        title = day.get("title", f"Day {day_num}")
+        hotel = day.get("hotel", hotel_name)
+        activities = day.get("activities", [])
+
+        lines.append(f"### {title}")
+        lines.append(f"🏨 *Staying at: {hotel}*")
+        lines.append("")
+        for act in activities:
+            lines.append(f"- {act}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def build_interface() -> gr.Blocks:
+
     with gr.Blocks(
         title="Smart itinerary planner • Professional Itinerary Generator",
         theme=THEME,
@@ -1632,9 +1964,9 @@ def build_interface() -> gr.Blocks:
                         container=False
                     )
                     
-                    travel_date = gr.Textbox(
-                        label="📅 Travel Date / Window",
-                        placeholder="e.g., 2025-06-15 or 'June 15-20, 2025'",
+                    travel_date = gr.DateTime(
+                        label="📅 Travel Date",
+                        info="Select your travel date from the calendar",
                         container=False
                     )
 
@@ -1731,10 +2063,108 @@ def build_interface() -> gr.Blocks:
                             label="API Response Data",
                             container=False
                         )
+                    
+                    with gr.TabItem("✈️ Plan Your Trip"):
+                        gr.Markdown(
+                            "### ✈️ Plan Your Trip\n"
+                            "Enter your destination, choose a hotel and transport — we'll build your itinerary!\n"
+                            "> No budget input needed. Options range from budget to luxury automatically."
+                        )
+                        
+                        with gr.Group():
+                            gr.Markdown("#### 🗺️ Where & When")
+                            with gr.Row():
+                                trip_origin = gr.Textbox(
+                                    label="🏠 Origin City *",
+                                    placeholder="e.g., Islamabad, Lahore, Karachi",
+                                    container=False,
+                                )
+                                trip_destination = gr.Textbox(
+                                    label="📍 Destination City *",
+                                    placeholder="e.g., Lahore, Swat, Naran, Murree",
+                                    container=False,
+                                )
+                            with gr.Row():
+                                trip_days = gr.Slider(
+                                    1, 21, value=3, step=1,
+                                    label="📅 Number of Days",
+                                    container=False,
+                                )
+                                trip_travelers = gr.Slider(
+                                    1, 10, value=1, step=1,
+                                    label="👥 Number of Travelers",
+                                    container=False,
+                                )
+                                trip_start_date = gr.DateTime(
+                                    label="🗓️ Start Date",
+                                    info="Choose start date from calendar",
+                                    container=False,
+                                )
+                        
+                        trip_options_btn = gr.Button(
+                            "🔍 Get Hotel & Transport Options",
+                            variant="primary",
+                            size="lg",
+                        )
+                        trip_options_status = gr.Textbox(
+                            label="Status",
+                            interactive=False,
+                            container=False,
+                        )
+                        
+                        with gr.Group():
+                            gr.Markdown("#### 🌤️ Daily Weather")
+                            trip_weather_md = gr.Markdown(
+                                "Select destination and date, then click **Get Hotel & Transport Options**."
+                            )
+
+                        with gr.Group():
+                            gr.Markdown("#### 🔗 Transport Redirect")
+                            trip_redirect_mode = gr.Dropdown(
+                                choices=["Bus", "InDrive", "Train"],
+                                label="Choose Transport Provider",
+                                value="Bus",
+                                container=False,
+                            )
+                            trip_redirect_btn = gr.Button(
+                                "Open Provider Link",
+                                variant="secondary",
+                            )
+                            trip_redirect_md = gr.Markdown(
+                                "Choose mode, origin, destination, and date to generate provider link."
+                            )
+
+                        with gr.Group():
+                            gr.Markdown("#### 🏨 Select a Hotel")
+                            trip_hotel_radio = gr.Radio(
+                                choices=[],
+                                label="Available Hotels",
+                                container=False,
+                            )
+                        
+                        with gr.Group():
+                            gr.Markdown("#### 🚌 Select Transport")
+                            trip_transport_radio = gr.Radio(
+                                choices=[],
+                                label="Available Transport Options",
+                                container=False,
+                            )
+                        
+                        trip_generate_btn = gr.Button(
+                            "🗺️ Generate Itinerary",
+                            variant="primary",
+                            size="lg",
+                        )
+                        
+                        trip_itinerary_md = gr.Markdown(
+                            "*Your cost summary and itinerary will appear here after generating.*"
+                        )
 
         # State management
         itinerary_state = gr.State({})
         auth_token = gr.State("")  # Store authentication token
+        trip_options_state = gr.State(None)  # Store /api/trip/options response
+
         
         # Authentication event handlers
         def handle_login(email, password, token):
@@ -1835,7 +2265,117 @@ def build_interface() -> gr.Blocks:
             outputs=[chat_input]
         )
 
+
+        # ── Plan Your Trip event handlers ─────────────────────────────────────
+
+        def handle_trip_options(origin, destination, num_days, num_travelers, start_date):
+            """Get hotel & transport options and populate radio choices."""
+            status_msg, hotel_choices, transport_choices, data = call_trip_options(
+                origin, destination, int(num_days), int(num_travelers)
+            )
+            weather_md = build_daily_weather_markdown(destination, start_date, int(num_days))
+            if data is not None:
+                # Embed the trip_request into the options data so itinerary call can use it
+                data["_trip_request"] = {
+                    "origin": origin.strip(),
+                    "destination": destination.strip(),
+                    "num_days": int(num_days),
+                    "num_travelers": int(num_travelers),
+                }
+            return (
+                status_msg,
+                gr.update(choices=hotel_choices, value=None),
+                gr.update(choices=transport_choices, value=None),
+                data,
+                weather_md,
+            )
+
+        def handle_transport_redirect(mode, origin, destination, start_date):
+            """Build provider redirect link based on selected transport mode."""
+            return build_transport_redirect_markdown(mode, origin, destination, start_date)
+
+        def handle_trip_generate(options_data, hotel_choice, transport_choice):
+            """Map selected radio labels back to indices and generate itinerary."""
+            if not options_data:
+                return "❌ Please click 'Get Hotel & Transport Options' first."
+            if not hotel_choice:
+                return "❌ Please select a hotel."
+            if not transport_choice:
+                return "❌ Please select a transport option."
+
+            hotels = options_data.get("hotel_options", [])
+            transports = options_data.get("transport_options", [])
+
+            # Build the same labels as handle_trip_options to find the matching index
+            num_days = options_data.get("_trip_request", {}).get("num_days", 1)
+            num_travelers = options_data.get("_trip_request", {}).get("num_travelers", 1)
+
+            hotel_idx = -1
+            for i, h in enumerate(hotels):
+                stars = "⭐" * int(h.get("star_rating", 3))
+                name = h.get("name", f"Hotel {i+1}")
+                location = h.get("location", "")
+                ppn = h.get("price_per_night", 0)
+                total = h.get("total_price", ppn * num_days)
+                label = f"{stars} {name} — {location} | PKR {ppn:,.0f}/night (Total: PKR {total:,.0f})"
+                if label == hotel_choice:
+                    hotel_idx = i
+                    break
+
+            transport_idx = -1
+            for i, t in enumerate(transports):
+                t_type = t.get("type", "").capitalize()
+                provider = t.get("provider", "")
+                duration = t.get("duration", "")
+                total = t.get("total_price", 0)
+                ppp = t.get("price_per_person", 0)
+                label = f"{_transport_emoji(t_type)} {provider} | PKR {ppp:,.0f}/person · Total PKR {total:,.0f} · ⏱ {duration}"
+                if label == transport_choice:
+                    transport_idx = i
+                    break
+
+            return call_generate_trip_itinerary(options_data, hotel_idx, transport_idx)
+
+        trip_options_btn.click(
+            fn=handle_trip_options,
+            inputs=[trip_origin, trip_destination, trip_days, trip_travelers, trip_start_date],
+            outputs=[trip_options_status, trip_hotel_radio, trip_transport_radio, trip_options_state, trip_weather_md],
+        )
+
+        trip_redirect_btn.click(
+            fn=handle_transport_redirect,
+            inputs=[trip_redirect_mode, trip_origin, trip_destination, trip_start_date],
+            outputs=[trip_redirect_md],
+        )
+        trip_redirect_mode.change(
+            fn=handle_transport_redirect,
+            inputs=[trip_redirect_mode, trip_origin, trip_destination, trip_start_date],
+            outputs=[trip_redirect_md],
+        )
+        trip_origin.change(
+            fn=handle_transport_redirect,
+            inputs=[trip_redirect_mode, trip_origin, trip_destination, trip_start_date],
+            outputs=[trip_redirect_md],
+        )
+        trip_destination.change(
+            fn=handle_transport_redirect,
+            inputs=[trip_redirect_mode, trip_origin, trip_destination, trip_start_date],
+            outputs=[trip_redirect_md],
+        )
+        trip_start_date.change(
+            fn=handle_transport_redirect,
+            inputs=[trip_redirect_mode, trip_origin, trip_destination, trip_start_date],
+            outputs=[trip_redirect_md],
+        )
+
+        trip_generate_btn.click(
+            fn=handle_trip_generate,
+            inputs=[trip_options_state, trip_hotel_radio, trip_transport_radio],
+            outputs=[trip_itinerary_md],
+        )
+
     return demo
+
 
 if __name__ == "__main__":
     app = build_interface()

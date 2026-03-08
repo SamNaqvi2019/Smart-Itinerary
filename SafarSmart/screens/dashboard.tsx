@@ -14,6 +14,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '../src/context/AppContext';
 import { theme } from '../src/theme';
+import FallingLeaves from '../src/components/FallingLeaves';
 
 const GREEN = '#01411C';
 
@@ -54,6 +55,9 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
+      <View style={styles.fallingLeavesWrap}>
+        <FallingLeaves />
+      </View>
       <StatusBar style="light" />
 
       {/* ── Green Header ── */}
@@ -135,7 +139,7 @@ export default function DashboardScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.actionTitle}>Fare Calculator</Text>
-            <Text style={styles.actionSubtitle}>Compare Uber, Careem, InDrive & Bykea fares</Text>
+            <Text style={styles.actionSubtitle}>Compare inDrive, bus, train and plane fares</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
         </TouchableOpacity>
@@ -174,7 +178,7 @@ export default function DashboardScreen() {
               activeOpacity={0.8}
               onPress={() => {
                 // @ts-ignore
-                navigation.navigate('GenerateItinerary');
+                navigation.navigate('GenerateItinerary', { prefillDestination: item.city });
               }}
             >
               <View style={[styles.destIconBg, { backgroundColor: item.color + '22' }]}>
@@ -213,6 +217,10 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  fallingLeavesWrap: {
+    ...StyleSheet.absoluteFillObject,
+    pointerEvents: 'none',
+  },
   root: {
     flex: 1,
     backgroundColor: GREEN,

@@ -22,6 +22,34 @@ import FareMapView from '../src/components/FareMapView';
 const GREEN = '#01411C';
 const GOLD  = '#D4AF37';
 
+function buildIntercityOptions(distanceKm: number): ServiceFare[] {
+  const busExpected = Math.max(1000, distanceKm * 25);
+  const trainExpected = Math.max(1200, distanceKm * 20);
+  const planeExpected = Math.max(12000, distanceKm * 65);
+
+  const mk = (service: string, category: string, icon: string, expected: number, note: string): ServiceFare => ({
+    service,
+    category,
+    icon,
+    color: GREEN,
+    base_fare: 0,
+    per_km_rate: 0,
+    fare_min: expected * 0.85,
+    fare_expected: expected,
+    fare_max: expected * 1.25,
+    currency: 'PKR',
+    is_available: true,
+    is_peak_active: false,
+    note,
+  });
+
+  return [
+    mk('Bus', 'Intercity', '🚌', busExpected, 'Estimated intercity coach fare'),
+    mk('Train', 'Economy', '🚂', trainExpected, 'Estimated rail fare for standard class'),
+    mk('Plane', 'Economy', '✈️', planeExpected, 'Estimated economy airfare for this route'),
+  ];
+}
+
 // ── City picker (simple modal-less approach: inline scrollable list) ──────────
 function CityPicker({
   label,
@@ -171,6 +199,17 @@ export default function FareCalculatorScreen() {
       : `${result.duration_minutes} min`
     : '';
 
+  const displayedFares = result
+    ? [
+        ...result.fares.filter((fare) => fare.service.toLowerCase().includes('indrive')),
+        ...buildIntercityOptions(result.distance_km),
+      ]
+    : [];
+
+  const cheapestShownFare = displayedFares.length
+    ? displayedFares.reduce((min, fare) => (fare.fare_expected < min.fare_expected ? fare : min), displayedFares[0])
+    : null;
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <StatusBar style="light" />
@@ -182,7 +221,7 @@ export default function FareCalculatorScreen() {
         </TouchableOpacity>
         <View>
           <Text style={styles.headerTitle}>Fare Calculator</Text>
-          <Text style={styles.headerSub}>Compare Uber, Careem, InDrive, Bykea</Text>
+          <Text style={styles.headerSub}>Compare inDrive, bus, train and plane</Text>
         </View>
         <View style={{ width: 40 }} />
       </View>
@@ -318,7 +357,7 @@ export default function FareCalculatorScreen() {
                 <View style={{ marginLeft: 8 }}>
                   <Text style={styles.summaryLabel}>Cheapest</Text>
                   <Text style={[styles.summaryValue, { color: GOLD }]}>
-                    PKR {Math.round(result.cheapest_fare).toLocaleString()}
+                    PKR {Math.round((cheapestShownFare?.fare_expected || 0)).toLocaleString()}
                   </Text>
                 </View>
               </View>
@@ -328,20 +367,21 @@ export default function FareCalculatorScreen() {
             <View style={styles.cheapestNote}>
               <Ionicons name="star" size={14} color={GOLD} />
               <Text style={styles.cheapestNoteText}>
-                Best deal: <Text style={{ fontWeight: '700' }}>{result.cheapest_service}</Text>
+                Best deal: <Text style={{ fontWeight: '700' }}>{cheapestShownFare ? `${cheapestShownFare.service} ${cheapestShownFare.category}` : 'N/A'}</Text>
               </Text>
             </View>
 
             {/* Fare cards */}
             <Text style={styles.sectionTitle}>All Services</Text>
-            {result.fares.map((fare, i) => (
+            {displayedFares.map((fare, i) => (
               <FareCard
                 key={`${fare.service}-${fare.category}-${i}`}
                 fare={fare}
                 isCheapest={
+                  !!cheapestShownFare &&
                   fare.is_available &&
-                  fare.fare_expected === result.cheapest_fare &&
-                  `${fare.service} ${fare.category}` === result.cheapest_service
+                  fare.fare_expected === cheapestShownFare.fare_expected &&
+                  `${fare.service} ${fare.category}` === `${cheapestShownFare.service} ${cheapestShownFare.category}`
                 }
               />
             ))}

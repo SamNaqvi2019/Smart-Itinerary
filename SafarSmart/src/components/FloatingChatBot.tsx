@@ -19,6 +19,8 @@ import MarkdownText from './MarkdownText';
 
 interface FloatingChatBotProps {
   itineraryData?: ItineraryResponse & { destination_city?: string; departure_city?: string };
+  rawContext?: Record<string, any>;
+  fabBottomOffset?: number;
 }
 
 interface Message {
@@ -29,7 +31,7 @@ interface Message {
   quickActions?: { label: string; value: string }[];
 }
 
-export const FloatingChatBot: React.FC<FloatingChatBotProps> = ({ itineraryData }) => {
+export const FloatingChatBot: React.FC<FloatingChatBotProps> = ({ itineraryData, rawContext, fabBottomOffset }) => {
   const [visible, setVisible] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -40,16 +42,18 @@ export const FloatingChatBot: React.FC<FloatingChatBotProps> = ({ itineraryData 
   // Initialize with welcome message and reset when language changes
   useEffect(() => {
     if (visible) {
+      const hasContext = !!(itineraryData || rawContext);
+      const destName = itineraryData?.destination_city || (rawContext as any)?.destination || 'your destination';
       const welcomeMessage: Message = {
         id: 'welcome',
         role: 'assistant',
         content: language === 'ur'
-          ? (itineraryData
-              ? `ہیلو! میں آپ کا سفر کا معاون ہوں۔ میں آپ کے ${itineraryData.destination_city || 'منزل'} کے سفر کے بارے میں سوالات میں مدد کر سکتا ہوں۔ میں آپ کی کس طرح مدد کر سکتا ہوں؟`
-              : 'ہیلو! میں آپ کا سفر کا معاون ہوں۔ میں آپ کی کس طرح مدد کر سکتا ہوں؟')
-          : (itineraryData
-              ? `Hi! I'm your Travel Assistant. I can help you with questions about your trip to ${itineraryData.destination_city || 'your destination'}. How can I help you?`
-              : "Hi! I'm your Travel Assistant. How can I help you?"),
+          ? (hasContext
+            ? `ہیلو! میں آپ کا سفر کا معاون ہوں۔ میں آپ کے ${destName === 'your destination' ? 'منزل' : destName} کے سفر کے بارے میں سوالات میں مدد کر سکتا ہوں۔ میں آپ کی کس طرح مدد کر سکتا ہوں؟`
+            : 'ہیلو! میں آپ کا سفر کا معاون ہوں۔ میں آپ کی کس طرح مدد کر سکتا ہوں؟')
+          : (hasContext
+            ? `Hi! I'm your Travel Assistant. I can help you with questions about your trip to ${destName}. How can I help you?`
+            : "Hi! I'm your Travel Assistant. How can I help you?"),
         timestamp: new Date(),
       };
       // Reset messages when language changes or modal opens
@@ -90,10 +94,12 @@ export const FloatingChatBot: React.FC<FloatingChatBotProps> = ({ itineraryData 
     setLoading(true);
 
     try {
-      // Prepare context
-      const context = itineraryData
-        ? summarizeItineraryForContext(itineraryData)
-        : undefined;
+      // Prepare context — use rawContext if provided, otherwise summarize itineraryData
+      const context = rawContext
+        ? rawContext
+        : itineraryData
+          ? summarizeItineraryForContext(itineraryData)
+          : undefined;
 
       // Prepare history - convert to backend format
       const history: ChatTurn[] = messages
@@ -123,8 +129,8 @@ export const FloatingChatBot: React.FC<FloatingChatBotProps> = ({ itineraryData 
         replyText = response;
       } else if (response && typeof response === 'object') {
         // Extract reply from response object
-        replyText = response.reply || response.message || response.answer || JSON.stringify(response);
-        
+        replyText = response.reply || (response as any).message || (response as any).answer || JSON.stringify(response);
+
         // If replyText is still JSON, try to parse it
         if (replyText.startsWith('{') || replyText.startsWith('[')) {
           try {
@@ -188,7 +194,7 @@ export const FloatingChatBot: React.FC<FloatingChatBotProps> = ({ itineraryData 
     <>
       {/* Floating Action Button */}
       <TouchableOpacity
-        style={styles.fab}
+        style={[styles.fab, { bottom: fabBottomOffset ?? 20 }]}
         onPress={() => setVisible(true)}
         activeOpacity={0.8}
       >
@@ -284,7 +290,7 @@ export const FloatingChatBot: React.FC<FloatingChatBotProps> = ({ itineraryData 
                     </View>
                   )}
                   <Text style={styles.timestamp}>{formatTime(message.timestamp)}</Text>
-                  
+
                   {/* Quick Actions */}
                   {message.quickActions && message.quickActions.length > 0 && (
                     <View style={styles.quickActionsContainer}>

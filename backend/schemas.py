@@ -167,6 +167,7 @@ class TransportOption(BaseModel):
     price_per_person: float
     total_price: float
     duration: str
+    distance_km: Optional[float] = None
 
 
 class BudgetOptionsResponse(BaseModel):
@@ -185,4 +186,68 @@ class EstimatedCostResponse(BaseModel):
     selected_transport: TransportOption
     total_estimated_cost: float
     note: str = "⚠️ Activities and food are not included in this estimate"
+
+
+# ── New trip planning schemas (no budget) ────────────────────────────────────
+
+class TripRequest(BaseModel):
+    origin: str = Field(..., min_length=1, max_length=100, description="Origin city name")
+    destination: str = Field(..., min_length=1, max_length=100, description="Destination city name")
+    num_days: int = Field(..., gt=0, le=30, description="Number of days")
+    num_travelers: int = Field(..., gt=0, le=20, description="Number of travelers")
+    activity_preferences: Optional[List[str]] = Field(None, description="Preferred activity types, e.g. ['nature', 'historical', 'adventure']")
+
+    @field_validator('origin', 'destination')
+    @classmethod
+    def validate_city(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('City cannot be empty')
+        return v.strip()
+
+
+class TripOptionsResponse(BaseModel):
+    hotel_options: List[HotelOption]
+    transport_options: List[TransportOption]
+    distance_km: float
+
+
+class SelectionRequest(BaseModel):
+    trip_request: TripRequest
+    selected_hotel_index: int = Field(..., ge=0)
+    selected_transport_index: int = Field(..., ge=0)
+    hotel_options: List[HotelOption]
+    transport_options: List[TransportOption]
+    activity_preferences: Optional[List[str]] = Field(None, description="Preferred activity types")
+
+
+class CostSummary(BaseModel):
+    hotel_name: str
+    hotel_price_per_night: float
+    hotel_total: float
+    transport_name: str
+    transport_total: float
+    total_estimated_cost: float
+    note: str = "Activities and food are not included in this estimate"
+
+
+class ActivityLocation(BaseModel):
+    name: str
+    latitude: float
+    longitude: float
+    maps_url: str
+
+
+class TripDayPlan(BaseModel):
+    day_number: int
+    title: str
+    activities: List[str]
+    hotel: str
+    image_url: Optional[str] = None
+    activity_locations: Optional[List[ActivityLocation]] = None
+
+
+class TripItineraryResponse(BaseModel):
+    cost_summary: CostSummary
+    days: List[TripDayPlan]
+    weather_considerations: Optional[str] = None
 

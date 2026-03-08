@@ -26,8 +26,18 @@ import ItineraryMapView from '../src/components/ItineraryMapView';
 import { INTERCITY_OPTIONS, INTRACITY_OPTIONS } from '../src/data/transportOptions';
 import FloatingChatBot from '../src/components/FloatingChatBot';
 import { translateToUrdu } from '../src/utils/translation';
+import FallingLeaves from '../src/components/FallingLeaves';
 
 const GREEN = '#01411C';
+
+const CITY_THEME: Record<string, { bg: string; accent: string; emoji: string }> = {
+  lahore: { bg: '#5C3B1E', accent: '#D4AF37', emoji: '🕌' },
+  islamabad: { bg: '#1E4D7A', accent: '#7ED7FF', emoji: '🏛️' },
+  karachi: { bg: '#0F4C5C', accent: '#7EE8FA', emoji: '🌊' },
+  hunza: { bg: '#1D3B2A', accent: '#A6E36B', emoji: '🏔️' },
+  swat: { bg: '#1F5E45', accent: '#8DE4AF', emoji: '🌿' },
+  murree: { bg: '#345E2B', accent: '#BDE58A', emoji: '🌲' },
+};
 
 // ── Date helper ──────────────────────────────────────────────
 const formatDate = (dateString: string) => {
@@ -366,6 +376,7 @@ export default function ItineraryDetailScreen() {
   const [showMap, setShowMap] = useState(false);
   const [isUrdu, setIsUrdu] = useState(false);
   const [translatedData, setTranslatedData] = useState<any>(null);
+  const [expandedDays, setExpandedDays] = useState<Record<number, boolean>>({});
 
   // Feedback
   const [fbRating, setFbRating] = useState(0);
@@ -458,6 +469,10 @@ export default function ItineraryDetailScreen() {
       if (itineraryId) {
         const data = await getItineraryById(itineraryId);
         setItinerary(data);
+        const days = data?.response?.days || [];
+        const expanded: Record<number, boolean> = {};
+        days.forEach((d: any, idx: number) => { expanded[(d.day ?? d.day_number ?? idx + 1)] = true; });
+        setExpandedDays(expanded);
         if (data?.feedback) {
           setFbRating(data.feedback.rating);
           setFbComment(data.feedback.comment);
@@ -514,13 +529,21 @@ export default function ItineraryDetailScreen() {
 
   const request = itinerary.request;
   const response = isUrdu && translatedData ? translatedData : itinerary.response;
+  const cityTheme = CITY_THEME[(request.destination_city || '').trim().toLowerCase()] || {
+    bg: GREEN,
+    accent: '#D4AF37',
+    emoji: '🧭',
+  };
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
+      <View style={styles.fallingLeavesWrap}>
+        <FallingLeaves />
+      </View>
       <StatusBar style="light" />
 
       {/* ── Green Header ── */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: cityTheme.bg }]}>
         <View style={styles.headerTopRow}>
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.75}>
             <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
@@ -555,7 +578,7 @@ export default function ItineraryDetailScreen() {
           </View>
         </View>
 
-        <Text style={styles.headerDestination}>{request.destination_city}</Text>
+        <Text style={styles.headerDestination}>{cityTheme.emoji} {request.destination_city}</Text>
         <View style={styles.headerMetaRow}>
           <View style={styles.headerPill}>
             <Ionicons name="calendar-outline" size={12} color="rgba(255,255,255,0.8)" />
@@ -665,66 +688,86 @@ export default function ItineraryDetailScreen() {
 
         {/* Day-by-Day Timeline */}
         <SectionCard title="🗓️ Day-by-Day Plan">
-          {response.days.map((day: any, index: number) => (
-            <View key={index} style={[styles.dayContainer, index < response.days.length - 1 && styles.dayBorder]}>
-              {/* Day header */}
-              <View style={styles.dayHeader}>
-                <View style={styles.dayBadge}>
-                  <Text style={styles.dayBadgeText}>{day.day}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.dayLabel}>Day {day.day}</Text>
-                  {day.date && <Text style={styles.dayDate}>{formatDate(day.date)}</Text>}
-                </View>
-              </View>
+          {response.days.map((day: any, index: number) => {
+            const dayNum = day.day ?? day.day_number ?? index + 1;
+            const isExpanded = expandedDays[dayNum] ?? true;
+            const title = day.title || `Day ${dayNum}`;
+            const activities = day.activities || day.places || [];
+            const dayImage = day.image_url || (day.images && day.images[0]);
 
-              {/* Places chips */}
-              {day.places && day.places.length > 0 && (
-                <View style={styles.chipsWrap}>
-                  {day.places.map((place: any, pi: number) => (
-                    <View key={pi} style={styles.placeChip}>
-                      <Ionicons name="location-outline" size={11} color="#fff" />
-                      <Text style={styles.placeChipText}>{place}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Description */}
-              {day.description && (
-                <Text style={styles.dayDesc}>{day.description}</Text>
-              )}
-
-              {/* Images */}
-              {day.images && day.images.length > 0 && (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.imagesRow}
+            return (
+              <View key={index} style={[styles.dayContainer, index < response.days.length - 1 && styles.dayBorder]}>
+                <TouchableOpacity
+                  style={styles.dayHeaderRow}
+                  activeOpacity={0.8}
+                  onPress={() => setExpandedDays((prev) => ({ ...prev, [dayNum]: !isExpanded }))}
                 >
-                  {day.images.slice(0, 6).map((img: any, ii: number) => (
-                    <Image
-                      key={ii}
-                      source={{ uri: img }}
-                      style={styles.dayImage}
-                      onError={() => {}}
+                  <View style={styles.dayHeader}>
+                    <View style={[styles.dayBadge, { backgroundColor: cityTheme.bg }]}>
+                      <Text style={styles.dayBadgeText}>{dayNum}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.dayLabel}>{title}</Text>
+                      {day.date && <Text style={styles.dayDate}>{formatDate(day.date)}</Text>}
+                    </View>
+                  </View>
+                  <View style={styles.dayHeaderMeta}>
+                    <Text style={styles.dayHeaderMetaText}>{activities.length} items</Text>
+                    <Ionicons
+                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={theme.colors.textSecondary}
                     />
-                  ))}
-                </ScrollView>
-              )}
+                  </View>
+                </TouchableOpacity>
 
-              {/* Per-day mini map */}
-              {showMap && day.spot_locations && day.spot_locations.length > 0 && (
-                <View style={styles.dayMapWrap}>
-                  <ItineraryMapView
-                    spots={day.spot_locations}
-                    dayLabel={`Day ${day.day}`}
-                    height={200}
-                  />
-                </View>
-              )}
-            </View>
-          ))}
+                {isExpanded ? (
+                  <>
+                    {dayImage ? (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => Linking.openURL(dayImage)}
+                      >
+                        <Image
+                          source={{ uri: dayImage }}
+                          style={styles.dayImage}
+                          resizeMode="cover"
+                        />
+                        <Text style={styles.tapHint}>Tap image to view full size</Text>
+                      </TouchableOpacity>
+                    ) : null}
+
+                    {activities.length > 0 && (
+                      <View style={styles.chipsWrap}>
+                        {activities.map((place: any, pi: number) => (
+                          <View key={pi} style={[styles.placeChip, { backgroundColor: cityTheme.bg }]}>
+                            <Ionicons name="location-outline" size={11} color="#fff" />
+                            <Text style={styles.placeChipText}>{place}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {day.description && (
+                      <Text style={styles.dayDesc}>{day.description}</Text>
+                    )}
+
+                    {showMap && day.spot_locations && day.spot_locations.length > 0 && (
+                      <View style={styles.dayMapWrap}>
+                        <ItineraryMapView
+                          spots={day.spot_locations}
+                          dayLabel={`Day ${dayNum}`}
+                          height={200}
+                        />
+                      </View>
+                    )}
+                  </>
+                ) : (
+                  <Text style={styles.dayCollapsedText}>Tap to expand day details.</Text>
+                )}
+              </View>
+            );
+          })}
         </SectionCard>
 
         {/* Travel Options */}
@@ -1061,6 +1104,10 @@ const sc = StyleSheet.create({
 
 // ── Main styles ───────────────────────────────────────────────
 const styles = StyleSheet.create({
+  fallingLeavesWrap: {
+    ...StyleSheet.absoluteFillObject,
+    pointerEvents: 'none',
+  },
   root: {
     flex: 1,
     backgroundColor: GREEN,
@@ -1286,6 +1333,22 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     marginBottom: 16,
   },
+  dayHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  dayHeaderMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dayHeaderMetaText: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
   dayBorder: {
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
@@ -1324,7 +1387,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     marginBottom: 10,
-    marginLeft: 50,
+    marginLeft: 0,
   },
   placeChip: {
     flexDirection: 'row',
@@ -1344,19 +1407,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: theme.colors.textSecondary,
     lineHeight: 20,
-    marginLeft: 50,
+    marginLeft: 0,
     marginBottom: 10,
   },
   imagesRow: {
-    marginLeft: 50,
+    marginLeft: 0,
     marginTop: 6,
   },
   dayImage: {
-    width: 110,
-    height: 110,
+    width: '100%',
+    height: 180,
     borderRadius: 12,
-    marginRight: 8,
+    marginBottom: 4,
     backgroundColor: theme.colors.background,
+  } as any,
+  tapHint: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 8,
+  } as any,
+  dayCollapsedText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic',
   },
 
   // Transport
@@ -1497,7 +1571,7 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   dayMapWrap: {
-    marginLeft: 50,
+    marginLeft: 0,
     marginTop: 12,
     borderRadius: 14,
     overflow: 'hidden',

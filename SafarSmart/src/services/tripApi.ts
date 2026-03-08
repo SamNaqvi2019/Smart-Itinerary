@@ -8,6 +8,7 @@ export interface TripRequest {
     destination: string;
     num_days: number;
     num_travelers: number;
+    activity_preferences?: string[];
 }
 
 export interface HotelOption {
@@ -40,6 +41,7 @@ export interface SelectionRequest {
     selected_transport_index: number;
     hotel_options: HotelOption[];
     transport_options: TransportOption[];
+    activity_preferences?: string[];
 }
 
 export interface CostSummary {
@@ -52,12 +54,20 @@ export interface CostSummary {
     note: string;
 }
 
+export interface ActivityLocation {
+    name: string;
+    latitude: number;
+    longitude: number;
+    maps_url: string;
+}
+
 export interface TripDayPlan {
     day_number: number;
     title: string;
     activities: string[];
     hotel: string;
     image_url?: string;
+    activity_locations?: ActivityLocation[];
 }
 
 export interface TripItineraryResponse {

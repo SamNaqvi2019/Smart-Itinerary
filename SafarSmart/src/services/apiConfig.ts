@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
  */
 
 // ⚠️ UPDATE THIS when you restart ngrok:
-const NGROK_URL = 'https://1d18-182-188-90-130.ngrok-free.app';
+const NGROK_URL = 'https://ab08-182-188-90-130.ngrok-free.app';
 
 const getApiBaseUrl = () => {
     if (__DEV__) {

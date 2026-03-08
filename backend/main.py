@@ -1,7 +1,7 @@
 # backend/main.py
 
 # Import FastAPI to create the app, and the routes for user, itinerary, and chatbot
-from routes import user, itinerary, chatbot, fare, feedback, budget, budget_routes
+from routes import user, itinerary, chatbot, fare, feedback, budget, budget_routes, trip_routes
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -28,6 +28,7 @@ app.include_router(fare.router,     prefix="/fare",     tags=["fare"])
 app.include_router(feedback.router, prefix="/feedback", tags=["feedback"])
 app.include_router(budget.router,        prefix="/budget",     tags=["budget"])
 app.include_router(budget_routes.router, prefix="/api/budget", tags=["budget-planner"])
+app.include_router(trip_routes.router,   prefix="/api/trip",   tags=["trip-planner"])
 
 # Simple root route for testing if the server is running
 @app.get("/")

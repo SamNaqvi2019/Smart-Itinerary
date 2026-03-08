@@ -1,16 +1,19 @@
 from typing import List, Dict, Any, Optional
 import json
 
-from sentence_transformers import SentenceTransformer
 from vector_store import get_spots_collection
 
-# ---------- Embedding model ----------
+# sentence_transformers is imported lazily so the server starts even if not yet installed
+_model = None
 MODEL_NAME = "all-MiniLM-L6-v2"
-_model = SentenceTransformer(MODEL_NAME)
 
 
 def _embed_query(text: str) -> List[float]:
     """Embed a query string into a vector using the same model as embed_data.py."""
+    global _model
+    if _model is None:
+        from sentence_transformers import SentenceTransformer
+        _model = SentenceTransformer(MODEL_NAME)
     if not text:
         text = "tourist attractions Pakistan"
     return _model.encode(text, convert_to_numpy=True).tolist()

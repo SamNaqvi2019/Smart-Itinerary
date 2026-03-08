@@ -29,16 +29,33 @@ const formatDate = (dateString: string) => {
   }
 };
 
-const INFO_ROWS = (request: any, response: any) => [
-  { icon: 'calendar-outline' as const, label: 'Date', value: request.travel_date || '—' },
-  { icon: 'people-outline' as const, label: 'People', value: String(request.num_of_people || 1) },
-  { icon: 'location-outline' as const, label: 'From', value: request.departure_city || '—' },
-  {
-    icon: 'time-outline' as const,
-    label: 'Duration',
-    value: `${response.days?.length || request.num_days || '?'} days`,
-  },
-];
+const INFO_ROWS = (request: any, response: any) => {
+  const origin = request.departure_city || '';
+  const dest = request.destination_city || '';
+  const route = origin && dest ? `${origin} → ${dest}` : (dest || origin || '—');
+  return [
+    {
+      icon: 'navigate-outline' as const,
+      label: 'Route',
+      value: route,
+    },
+    {
+      icon: 'people-outline' as const,
+      label: 'Travellers',
+      value: String(request.num_of_people || 1),
+    },
+    {
+      icon: 'time-outline' as const,
+      label: 'Duration',
+      value: `${response.days?.length || request.num_days || '?'} days`,
+    },
+    {
+      icon: 'calendar-outline' as const,
+      label: 'Saved',
+      value: request.travel_date || '—',
+    },
+  ];
+};
 
 export default function SavedItinerariesScreen() {
   const navigation = useNavigation();
@@ -192,8 +209,11 @@ export default function SavedItinerariesScreen() {
 
                   {/* Info grid */}
                   <View style={styles.infoGrid}>
-                    {rows.map((row) => (
-                      <View key={row.label} style={styles.infoCell}>
+                    {rows.map((row, idx) => (
+                      <View
+                        key={row.label}
+                        style={[styles.infoCell, idx === 0 && styles.infoCellFull]}
+                      >
                         <View style={styles.infoCellIcon}>
                           <Ionicons name={row.icon} size={14} color={GREEN} />
                         </View>
@@ -408,6 +428,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 10,
     gap: 3,
+  },
+  infoCellFull: {
+    width: '100%',
   },
   infoCellIcon: {
     marginBottom: 2,

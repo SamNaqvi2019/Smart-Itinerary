@@ -19,6 +19,7 @@ from config import (
     _get_openai_client,
 )
 from schemas import (
+    ActivityLocation,
     CostSummary,
     HotelOption,
     SelectionRequest,
@@ -86,17 +87,19 @@ DISTANCE_MAP: dict[tuple[str, str], float] = {
 }
 
 # Per-km price ranges (PKR). Stored as (min, max) — we use midpoint for a single price.
+# Updated to reflect realistic 2024-2025 Pakistani transport costs.
 TRANSPORT_RATES: dict[str, tuple[float, float]] = {
-    "Train Economy":       (2.5, 4.0),
-    "Bus Economy":         (4.0, 8.0),
-    "Bus Business":        (7.0, 10.0),
-    "Train AC Business":   (5.0, 9.0),
-    "Flight Economy":      (12.0, 22.0),
-    "Car Sedan + Driver":  (25.0, 45.0),
-    "Car SUV + Driver":    (40.0, 70.0),
+    "Train Economy":       (4.0, 6.0),       # ~PKR 5/km  → ISB-LHE ≈ PKR 1,875
+    "Bus Economy":         (6.0, 10.0),       # ~PKR 8/km  → ISB-LHE ≈ PKR 3,000
+    "Bus Business":        (10.0, 14.0),      # ~PKR 12/km → ISB-LHE ≈ PKR 4,500
+    "Train AC Business":   (8.0, 14.0),       # ~PKR 11/km → ISB-LHE ≈ PKR 4,125
+    "Flight Economy":      (8.0, 12.0),       # ~PKR 10/km + base fare below
+    "Car Sedan + Driver":  (35.0, 60.0),      # ~PKR 47/km → ISB-LHE ≈ PKR 17,800
+    "Car SUV + Driver":    (55.0, 90.0),      # ~PKR 72/km → ISB-LHE ≈ PKR 27,200
 }
 
-FLIGHT_MIN_KM = 300  # flights only shown for routes ≥ this distance
+FLIGHT_MIN_KM = 300       # flights only shown for routes ≥ this distance
+FLIGHT_BASE_FARE = 8000   # fixed base cost (PKR) added to every flight ticket
 
 
 def _lookup_distance(origin: str, destination: str) -> float:
@@ -363,6 +366,11 @@ def get_transport_options(
         mid_rate = (rate_min + rate_max) / 2
         base_cost = round(distance_km * mid_rate, 2)
 
+        # Add base fare for flights (fixed cost per ticket)
+        is_flight = "Flight" in mode_name
+        if is_flight:
+            base_cost = round(base_cost + FLIGHT_BASE_FARE, 2)
+
         is_car = "Car" in mode_name
 
         if is_car:
@@ -438,7 +446,15 @@ def _itinerary_prompt(
     trip_req: TripRequest,
     hotel: HotelOption,
     transport: TransportOption,
+    activity_preferences: Optional[List[str]] = None,
 ) -> str:
+    prefs_block = ""
+    if activity_preferences:
+        prefs_block = (
+            f"\nACTIVITY PREFERENCES (prioritise these types of activities):\n"
+            f"  {', '.join(activity_preferences)}\n"
+            f"  Focus the day plans on these types of activities as much as possible.\n"
+        )
     return f"""You are an expert Pakistani travel planner.
 
 Generate a day-by-day itinerary for this trip:
@@ -448,7 +464,7 @@ Generate a day-by-day itinerary for this trip:
 - Travelers: {trip_req.num_travelers}
 - Hotel (ONLY this hotel): {hotel.name} ({hotel.star_rating}★, {hotel.location})
 - Transport (ONLY this mode): {transport.provider}
-
+{prefs_block}
 STRICT RULES:
 1. Day 1 must mention departure from {trip_req.origin} via {transport.provider}.
 2. Every day must say the traveler is staying at {hotel.name}.
@@ -459,6 +475,7 @@ STRICT RULES:
 7. Do NOT include any food prices, restaurant prices, or activity prices.
 8. Do NOT include food recommendations or food pricing.
 9. Keep activity descriptions engaging but price-free.
+10. When mentioning a specific place or attraction, include the EXACT place name clearly.
 
 Return a JSON array of exactly {trip_req.num_days} day objects. Each object:
   "day_number": integer starting at 1
@@ -534,8 +551,9 @@ def _generate_itinerary_sync(
     trip_req: TripRequest,
     hotel: HotelOption,
     transport: TransportOption,
+    activity_preferences: Optional[List[str]] = None,
 ) -> List[TripDayPlan]:
-    prompt = _itinerary_prompt(trip_req, hotel, transport)
+    prompt = _itinerary_prompt(trip_req, hotel, transport, activity_preferences)
     system = "You are a helpful Pakistani travel itinerary planner. Always return valid JSON arrays only."
     for attempt in range(2):
         try:
@@ -571,10 +589,13 @@ async def generate_trip_itinerary(
     transport = transport_opts[ti]
     trip_req = selection.trip_request
 
+    # Merge activity preferences from both places
+    prefs = selection.activity_preferences or trip_req.activity_preferences or None
+
     cost_summary = calculate_cost_summary(hotel, transport, trip_req.num_days)
 
     days = await asyncio.to_thread(
-        _generate_itinerary_sync, trip_req, hotel, transport
+        _generate_itinerary_sync, trip_req, hotel, transport, prefs
     )
 
     # ── Assign day images from real spot data ──────────────────
@@ -582,6 +603,9 @@ async def generate_trip_itinerary(
     for day in days:
         idx = (day.day_number - 1) % len(spot_images) if spot_images else -1
         day.image_url = spot_images[idx] if idx >= 0 else None
+
+    # ── Resolve activity locations for Google Maps ─────────────
+    _populate_activity_locations(days, trip_req.destination)
 
     # ── Weather ───────────────────────────────────────────────
     weather_considerations = _fetch_weather_considerations(
@@ -594,9 +618,156 @@ async def generate_trip_itinerary(
         weather_considerations=weather_considerations,
     )
 
-# ── Spot image helper ─────────────────────────────────────────────────────────
+# ── Activity location resolution ──────────────────────────────────────────────
 
+import urllib.parse as _urllib_parse
 from pathlib import Path as _Path
+
+_ALL_SPOTS_COORDS: Optional[list] = None
+
+
+def _load_all_spots_with_coords() -> list:
+    """
+    Load spots from both structured_spots.json and GB_normalized.json,
+    returning a flat list of dicts with keys: name, latitude, longitude, city.
+    """
+    global _ALL_SPOTS_COORDS
+    if _ALL_SPOTS_COORDS is not None:
+        return _ALL_SPOTS_COORDS
+
+    data_dir = _Path(__file__).resolve().parent / "data"
+    spots: list = []
+
+    # 1. structured_spots.json (flat array with latitude/longitude at top level)
+    ss_path = data_dir / "structured_spots.json"
+    if ss_path.exists():
+        try:
+            with ss_path.open("r", encoding="utf-8") as f:
+                for s in json.load(f):
+                    if s.get("latitude") and s.get("longitude") and s.get("name"):
+                        spots.append({
+                            "name": s["name"],
+                            "latitude": float(s["latitude"]),
+                            "longitude": float(s["longitude"]),
+                            "city": (s.get("city") or "").strip().lower(),
+                        })
+        except Exception as exc:
+            print(f"[TripEngine] Failed to load structured_spots.json for coords: {exc}")
+
+    # 2. GB_normalized.json (nested province → divisions → districts → destinations)
+    gb_path = data_dir / "GB_normalized.json"
+    if gb_path.exists():
+        try:
+            with gb_path.open("r", encoding="utf-8") as f:
+                gb = json.load(f)
+            for div in gb.get("divisions", []):
+                for district in div.get("districts", []):
+                    for dest in district.get("destinations", []):
+                        loc = dest.get("location", {})
+                        coords = loc.get("coordinates", {})
+                        lat = coords.get("latitude")
+                        lng = coords.get("longitude")
+                        if lat and lng and dest.get("name"):
+                            spots.append({
+                                "name": dest["name"],
+                                "latitude": float(lat),
+                                "longitude": float(lng),
+                                "city": (loc.get("district") or "").strip().lower(),
+                            })
+        except Exception as exc:
+            print(f"[TripEngine] Failed to load GB_normalized.json for coords: {exc}")
+
+    _ALL_SPOTS_COORDS = spots
+    return _ALL_SPOTS_COORDS
+
+
+def _make_maps_url(name: str, city: str, lat: Optional[float] = None, lng: Optional[float] = None) -> str:
+    """Build a Google Maps URL — pin if we have coords, search otherwise."""
+    if lat is not None and lng is not None:
+        return f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+    query = f"{name}, {city}, Pakistan"
+    return f"https://www.google.com/maps/search/?api=1&query={_urllib_parse.quote_plus(query)}"
+
+
+def _populate_activity_locations(days: List[TripDayPlan], destination: str) -> None:
+    """
+    For each day, try to match activity strings to known spots and attach
+    ActivityLocation objects with Google Maps URLs.
+    """
+    all_spots = _load_all_spots_with_coords()
+    dest_lower = destination.strip().lower()
+
+    for day in days:
+        locations: List[ActivityLocation] = []
+        seen_names: set = set()
+
+        for activity_text in day.activities:
+            act_lower = activity_text.lower()
+            best_match = None
+
+            # Try to find a spot whose name appears in the activity text
+            for spot in all_spots:
+                spot_name = spot["name"]
+                if spot_name.lower() in act_lower and spot_name not in seen_names:
+                    best_match = spot
+                    break
+
+            if best_match:
+                seen_names.add(best_match["name"])
+                locations.append(ActivityLocation(
+                    name=best_match["name"],
+                    latitude=best_match["latitude"],
+                    longitude=best_match["longitude"],
+                    maps_url=_make_maps_url(
+                        best_match["name"], destination,
+                        best_match["latitude"], best_match["longitude"]
+                    ),
+                ))
+            else:
+                # Extract a likely place name from the activity text
+                # Use the text after "visit", "explore", "head to", etc. as the place name
+                place_name = _extract_place_from_activity(activity_text)
+                if place_name and place_name not in seen_names:
+                    seen_names.add(place_name)
+                    locations.append(ActivityLocation(
+                        name=place_name,
+                        latitude=0.0,
+                        longitude=0.0,
+                        maps_url=_make_maps_url(place_name, destination),
+                    ))
+
+        day.activity_locations = locations if locations else None
+
+
+def _extract_place_from_activity(text: str) -> Optional[str]:
+    """
+    Try to extract a place name from an activity description string.
+    Returns the extracted place name or None.
+    """
+    import re as _re
+
+    # Common patterns: "Visit Faisal Mosque", "Explore the Margalla Hills", "Head to Daman-e-Koh"
+    patterns = [
+        r"(?:visit|explore|head to|check out|tour|stroll (?:around|through)|walk (?:around|through|to))\s+(?:the\s+)?(.+?)(?:\s+(?:in|for|and|to see|which|where|—|,|\.))",
+        r"(?:visit|explore|head to|check out|tour)\s+(?:the\s+)?(.+?)$",
+        r"(?:arrive (?:at|in))\s+(?:the\s+)?(.+?)(?:\s+(?:and|for|,|\.))",
+        r"check in to\s+(.+?)(?:\s*\.|\s+and)",
+    ]
+    for pat in patterns:
+        m = _re.search(pat, text, _re.IGNORECASE)
+        if m:
+            place = m.group(1).strip().rstrip(".,;:")
+            # Filter out generic phrases
+            if len(place) > 3 and place.lower() not in (
+                "the area", "the city", "the region", "local markets",
+                "a key attraction", "historical and cultural sites",
+                "natural landmarks nearby", "the local area",
+            ):
+                return place
+    return None
+
+
+# ── Spot image helper ─────────────────────────────────────────────────────────
 
 _SPOTS_CACHE: Optional[list] = None
 
